@@ -1,0 +1,76 @@
+From 2b648f9980b90d62d30ca6248d2ee954d0514a8a Mon Sep 17 00:00:00 2001
+From: Frederic Crozat <fcrozat@mandriva.com>
+Date: Tue, 7 Apr 2009 16:31:22 +0200
+Subject: [PATCH] improve waiting for dri device to appear when system is busy
+
+Rebased for 2.4.69 / tmb
+---
+ xf86drm.c |   29 +++++++++++++++++++++++++----
+ 1 files changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/xf86drm.c b/libdrm/xf86drm.c
+index 7672ea5..963eaf2 100644
+--- a/xf86drm.c
++++ b/xf86drm.c
+@@ -107,6 +107,7 @@
+ #define memclear(s) memset(&s, 0, sizeof(s))
+ 
+ static drmServerInfoPtr drm_server_info;
++static int drmOpenDeviceSimpleCheck = 0;
+ 
+ void drmSetServerInfo(drmServerInfoPtr info)
+ {
+@@ -370,22 +371,41 @@ static int drmOpenDevice(dev_t dev, int
+ #else
+     /* if we modprobed then wait for udev */
+     {
++        #define MAX_UDEV_COUNT 50
+         int udev_count = 0;
++	struct timespec delay_struct;
++
++	delay_struct.tv_sec = 0;
++
++	if (drmOpenDeviceSimpleCheck) {
++		udev_count = MAX_UDEV_COUNT-1;
++		delay_struct.tv_nsec = 0;
++		drmOpenDeviceSimpleCheck= 0;
++	}
++	else {
++		if (minor == 0) {
++			delay_struct.tv_nsec = 15000000;
++		}
++		else {
++			delay_struct.tv_nsec = 50000;
++		}
++	}
++
+ wait_for_udev:
+         if (stat(DRM_DIR_NAME, &st)) {
+-            usleep(20);
++            nanosleep(&delay_struct, NULL);
+             udev_count++;
+ 
+-            if (udev_count == 50)
++            if (udev_count == MAX_UDEV_COUNT)
+                 return -1;
+             goto wait_for_udev;
+         }
+ 
+         if (stat(buf, &st)) {
+-            usleep(20);
++            nanosleep(&delay_struct, NULL);
+             udev_count++;
+ 
+-            if (udev_count == 50)
++            if (udev_count == MAX_UDEV_COUNT)
+                 return -1;
+             goto wait_for_udev;
+         }
+@@ -483,6 +503,7 @@ int drmAvailable(void)
+     int           retval = 0;
+     int           fd;
+ 
++    drmOpenDeviceSimpleCheck = 1;
+     if ((fd = drmOpenMinor(0, 1, DRM_NODE_PRIMARY)) < 0) {
+         return 0;
+     }
